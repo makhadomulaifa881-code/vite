@@ -1,0 +1,120 @@
+import React, { useState } from "react";
+
+// ExcelHtmlCleaner.jsx // Single-file React component that lets you paste Excel-exported HTML (with mso- styles) // and converts it into a clean, web-friendly HTML table you can preview, copy, or download.
+
+export default function ExcelHtmlCleaner() { const [inputHtml, setInputHtml] = useState(""); const [cleanHtml, setCleanHtml] = useState(""); const [message, setMessage] = useState("");
+
+function sanitizeAndClean(html) { if (!html) return "";
+
+// Parse the HTML
+const parser = new DOMParser();
+const doc = parser.parseFromString(html, "text/html");
+
+// Remove <style> blocks (Excel's mso style blocks live here)
+doc.querySelectorAll("style").forEach((s) => s.remove());
+
+// Remove comments
+const iterator = doc.createNodeIterator(doc, NodeFilter.SHOW_COMMENT);
+let comment;
+while ((comment = iterator.nextNode())) comment.remove();
+
+// Walk all elements and remove MSO-specific attributes & classes
+const all = doc.querySelectorAll("*");
+all.forEach((el) => {
+  // Remove class attributes (Excel classes like xl65 are useless for the web)
+  if (el.hasAttribute("class")) el.removeAttribute("class");
+
+  // Remove attributes that start with mso- or contain 'mso-'
+  [...el.attributes].forEach((attr) => {
+    const name = attr.name.toLowerCase();
+    const val = attr.value;
+    if (name.startsWith("mso-") || name.includes("mso-")) {
+      el.removeAttribute(attr.name);
+    }
+  });
+
+  // Clean inline style: remove MSO- properties from style attribute
+  if (el.hasAttribute("style")) {
+    const style = el.getAttribute("style");
+    // remove any mso-... properties and odd Excel inline rules
+    const cleaned = style
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s && !/mso-/i.test(s) && !/progid:/i.test(s))
+      .join("; ");
+    if (cleaned) el.setAttribute("style", cleaned);
+    else el.removeAttribute("style");
+  }
+
+  // Remove empty attributes that might be artifacts
+  [...el.attributes].forEach((attr) => {
+    if (!attr.value || attr.value.trim() === "") el.removeAttribute(attr.name);
+  });
+});
+
+// If there's a table, try to add a minimal class so it looks nice
+doc.querySelectorAll("table").forEach((t) => {
+  // add a semantic table wrapper class
+  t.classList.add("cleaned-table");
+  // remove width attributes that Excel sets on table/cells if they're numeric pixel widths
+  [...t.attributes].forEach((attr) => {
+    if (/width/i.test(attr.name) || /height/i.test(attr.name)) t.removeAttribute(attr.name);
+  });
+  // make sure table has a border collapse style if none
+  if (!t.style || !t.style.borderCollapse) t.style.borderCollapse = "collapse";
+});
+
+// Serialize cleaned HTML
+const cleaned = doc.body.innerHTML.trim();
+return cleaned;
+
+}
+
+function handleConvert() { try { const cleaned = sanitizeAndClean(inputHtml); setCleanHtml(cleaned); setMessage("Converted — preview below. You can copy or download the HTML."); } catch (e) { setMessage("Error converting HTML: " + e.message); } }
+
+function handleCopy() { if (!cleanHtml) return setMessage("Nothing to copy — convert first."); navigator.clipboard .writeText(cleanHtml) .then(() => setMessage("Clean HTML copied to clipboard.")) .catch(() => setMessage("Failed to copy. Try manually selecting and copying.")); }
+
+function handleDownload() { if (!cleanHtml) return setMessage("Nothing to download — convert first."); const blob = new Blob([<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>Cleaned Table</title>\n<style>/* Minimal styling so table looks decent without Tailwind */\n.cleaned-table{border-collapse:collapse;width:100%;max-width:100%;} \n.cleaned-table td,.cleaned-table th{border:1px solid #ddd;padding:8px;text-align:left;}\n.cleaned-table th{background:#f3f4f6;font-weight:700;}\n</style></head><body>${cleanHtml}</body></html>], { type: "text/html" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "cleaned-table.html"; a.click(); URL.revokeObjectURL(url); setMessage("Downloaded cleaned-table.html"); }
+
+return ( <div className="min-h-screen p-6 bg-gray-50" style={{ fontFamily: "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial" }}> <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow p-6"> <h1 className="text-2xl font-bold mb-3">Excel HTML Cleaner</h1> <p className="text-sm mb-4">Paste the HTML exported from Excel (the part that contains <code><style></code> and <code><table></code>), then press <strong>Convert</strong> to get clean, web-friendly table markup.</p>
+
+<label className="block mb-2 font-medium">Paste Excel HTML here</label>
+    <textarea
+      value={inputHtml}
+      onChange={(e) => setInputHtml(e.target.value)}
+      className="w-full p-3 border rounded mb-3" rows={10}
+      placeholder="Paste the HTML export or copied HTML from Excel/Word here..."
+    />
+
+    <div className="flex gap-2 mb-4">
+      <button onClick={handleConvert} className="px-4 py-2 rounded bg-sky-600 text-white">Convert</button>
+      <button onClick={() => { setInputHtml(''); setCleanHtml(''); setMessage('Cleared.'); }} className="px-4 py-2 rounded bg-gray-200">Clear</button>
+      <button onClick={handleCopy} className="px-4 py-2 rounded bg-emerald-600 text-white">Copy HTML</button>
+      <button onClick={handleDownload} className="px-4 py-2 rounded bg-indigo-600 text-white">Download HTML</button>
+    </div>
+
+    <div className="mb-4 text-sm text-gray-600">{message}</div>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div>
+        <h2 className="font-semibold mb-2">Cleaned HTML (editable)</h2>
+        <textarea value={cleanHtml} onChange={(e) => setCleanHtml(e.target.value)} className="w-full p-3 border rounded h-64" />
+      </div>
+
+      <div>
+        <h2 className="font-semibold mb-2">Preview</h2>
+        <div className="p-3 border rounded h-64 overflow-auto bg-white" style={{ background: "white" }}>
+          {cleanHtml ? (
+            <div dangerouslySetInnerHTML={{ __html: cleanHtml }} />
+          ) : (
+            <div className="text-sm text-gray-500">Converted preview will appear here.</div>
+          )}
+        </div>
+      </div>
+    </div>
+
+    <div className="mt-6 text-xs text-gray-500">Tip: If your pasted HTML includes a large <code>&lt;style&gt;</code> block (with classes like <code>.xl65</code>), the tool removes those styles and class names to produce a clean table suitable for websites.</div>
+  </div>
+</div>
+
+); }
